@@ -717,7 +717,7 @@ void setup() {
 
   // init wiegand keyfob reader
   Serial.println("Configuring Wiegand keyfob reader");
-  wg.begin(WD0, WD0, WD1, WD1);
+  wg.begin(WD0, WD1);
   u8x8.print("WG ");
   
   // setup button debounce for the release switch
