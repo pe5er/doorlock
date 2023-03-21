@@ -16,13 +16,15 @@
 #include <ESPmDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
 /*-----( Declare Constants and Pin Numbers )-----*/
 #include "pcb_roller_shutter.h"
 #include "logo.h"
 #include "config.h"
 #include "secrets.h" // WiFi SSID and password
+#include "html.h"
 
 /*-----( Declare objects )-----*/
 //Initialise display library with no reset pin by passing it -1
@@ -32,7 +34,7 @@ Adafruit_SSD1306 display(-1);
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 
-WiFiServer server(80);
+AsyncWebServer server(80);
 
 /*-----( Declare Variables )-----*/
 bool ota_enabled = true;
@@ -49,6 +51,8 @@ unsigned long currentTime = millis();
 unsigned long previousTime = 0; 
 // Define timeout time in milliseconds (example: 2000ms = 2s)
 const long timeoutTime = 2000;
+
+const char* PARAM_INPUT_1 = "state";
 
 void setup() { /****** SETUP: RUNS ONCE ******/
 
@@ -111,7 +115,6 @@ void setup() { /****** SETUP: RUNS ONCE ******/
     });
 
   ArduinoOTA.begin();
-  server.begin(); // start webserver
 
   Serial.println("Ready");
   Serial.print("IP address: ");
@@ -127,8 +130,42 @@ void setup() { /****** SETUP: RUNS ONCE ******/
   }
   display.display();
 
+  // Route for root / web page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    if(!request->authenticate(WWW_USER, WWW_PASSWORD))
+      return request->requestAuthentication();
+    request->send_P(200, "text/html", index_html, processor);
+  });
+    
+  server.on("/logout", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(401);
+  });
 
+  server.on("/logged-out", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", logout_html, processor);
+  });
 
+  // Send a GET request to <ESP_IP>/update?state=<inputMessage>
+  server.on("/update", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    if(!request->authenticate(WWW_USER, WWW_PASSWORD))
+      return request->requestAuthentication();
+    String inputMessage;
+    String inputParam;
+    // GET input1 value on <ESP_IP>/update?state=<inputMessage>
+    if (request->hasParam(PARAM_INPUT_1)) {
+      inputMessage = request->getParam(PARAM_INPUT_1)->value();
+      inputParam = PARAM_INPUT_1;
+      digitalWrite(BUTTON_RELAY, inputMessage.toInt());
+    }
+    else {
+      inputMessage = "No message sent";
+      inputParam = "none";
+    }
+    Serial.println(inputMessage);
+    request->send(200, "text/plain", "OK");
+  });
+
+  server.begin(); // start webserver
 
 }  //--(end setup )---
 
@@ -136,119 +173,6 @@ void loop() { /****** LOOP: RUNS CONSTANTLY ******/
 
   ArduinoOTA.handle();
 
-  WiFiClient client = server.available();   // Listen for incoming clients
-
-  if (client) {                             // If a new client connects,
-    currentTime = millis();
-    previousTime = currentTime;
-    Serial.println("New Client.");          // print a message out in the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected() && currentTime - previousTime <= timeoutTime) {  // loop while the client's connected
-      currentTime = millis();
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        header += c;
-        if (c == '\n') {                    // if the byte is a newline character
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
-            
-            // turns the GPIOs on and off
-            if (header.indexOf("GET /led1/on") >= 0) {
-              Serial.println("LED1 on");
-              LED1_on = true;
-              digitalWrite(LED1, HIGH);
-            } else if (header.indexOf("GET /led1/off") >= 0) {
-              Serial.println("LED1 off");
-              LED1_on = false;
-              digitalWrite(LED1, LOW);
-            } else if (header.indexOf("GET /led2/on") >= 0) {
-              Serial.println("LED2 on");
-              LED2_on = true;
-              digitalWrite(LED2, HIGH);
-            } else if (header.indexOf("GET /led2/off") >= 0) {
-              Serial.println("LED2 off");
-              LED2_on = false;
-              digitalWrite(LED2, LOW);
-            } else if (header.indexOf("GET /ButtonRelay/on") >= 0) {
-              Serial.println("ButtonRelay off");
-              ButtonRelay_On = true;
-              digitalWrite(BUTTON_RELAY, HIGH);
-            } else if (header.indexOf("GET /ButtonRelay/off") >= 0) {
-              Serial.println("ButtonRelay off");
-              ButtonRelay_On = false;
-              digitalWrite(BUTTON_RELAY, LOW);
-            }
-            
-            // Display the HTML web page
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"icon\" href=\"data:,\">");
-            // CSS to style the on/off buttons 
-            // Feel free to change the background-color and font-size attributes to fit your preferences
-            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
-            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
-            client.println(".button2 {background-color: #555555;}</style></head>");
-            
-            // Web Page Heading
-            client.println("<body><h1>ESP32 Web Server</h1>");
-            
-            // If the lED1_on is false, it displays the ON button       
-            if (!LED1_on) {
-              client.println("<p>LED1 - Off</p>");
-              client.println("<p><a href=\"/led1/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p>LED1 - On</p>");
-              client.println("<p><a href=\"/led1/off\"><button class=\"button button2\">OFF</button></a></p>");
-            } 
-               
-            // If the lED2_on is false, it displays the ON button       
-            if (!LED2_on) {
-              client.println("<p>LED2 - Off</p>");
-              client.println("<p><a href=\"/led2/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p>LED2 - On</p>");
-              client.println("<p><a href=\"/led2/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-
-            // If the ButtonRelay_On is false, it displays the ON button       
-            if (!ButtonRelay_On) {
-              client.println("<p>ButtonRelay - Off</p>");
-              client.println("<p><a href=\"/ButtonRelay/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p>ButtonRelay - On</p>");
-              client.println("<p><a href=\"/ButtonRelay/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-
-            client.println("</body></html>");
-            
-            // The HTTP response ends with another blank line
-            client.println();
-            // Break out of the while loop
-            break;
-          } else { // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-      }
-    }
-    // Clear the header variable
-    header = "";
-    // Close the connection
-    client.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
-  }
 
 }  //--(end main loop )---
 
@@ -258,4 +182,33 @@ void printSerialAndDisplay(String text){
   display.println(text);
   display.display();
   Serial.println(text);
+}
+
+// Replaces placeholder with button section in your web page
+String processor(const String& var){
+  //Serial.println(var);
+  if(var == "BUTTONPLACEHOLDER"){
+    String buttons ="";
+    String ButtonRelay_On = outputState();
+    buttons+= "<p><label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleCheckbox(this)\" id=\"output\" " + ButtonRelay_On + "><span class=\"slider\"></span></label></p>";
+    return buttons;
+  }
+  if (var == "STATE"){
+    if (ButtonRelay_On){
+      return "ON";
+    } else {
+      return "OFF";
+    }
+  }
+  return String();
+}
+
+String outputState(){
+  if(ButtonRelay_On){
+    return "checked";
+  }
+  else {
+    return "";
+  }
+  return "";
 }
