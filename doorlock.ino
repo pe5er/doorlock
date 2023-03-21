@@ -12,8 +12,15 @@
 #include <Adafruit_SSD1306.h>
 
 /*-----( Declare Constants and Pin Numbers )-----*/
+<<<<<<< HEAD
 #include <pcb_roller_shutter.h>
 #include <logo.h>
+=======
+#include "pcb_roller_shutter.h"
+#include "logo.h"
+#include "config.h"
+#include "secrets.h"
+>>>>>>> c6d7a32 (let's not share passwords with the internet)
 
 /*-----( Declare objects )-----*/
 //Initialise display library with no reset pin by passing it -1
