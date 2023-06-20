@@ -1,5 +1,7 @@
 #define PCB_ROLLER_SHUTTER
 
+#define RESET_BUTTON 9
+
 #define BUTTON_RELAY 7
 #define DATA0 21
 #define DATA1 20

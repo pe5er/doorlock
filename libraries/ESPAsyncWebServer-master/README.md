@@ -527,25 +527,25 @@ request->send(response);
 ### Respond with content coming from a File
 ```cpp
 //Send index.htm with default content type
-request->send(SPIFFS, "/index.htm");
+request->send(littlefs, "/index.htm");
 
 //Send index.htm as text
-request->send(SPIFFS, "/index.htm", "text/plain");
+request->send(littlefs, "/index.htm", "text/plain");
 
 //Download index.htm
-request->send(SPIFFS, "/index.htm", String(), true);
+request->send(littlefs, "/index.htm", String(), true);
 ```
 
 ### Respond with content coming from a File and extra headers
 ```cpp
 //Send index.htm with default content type
-AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.htm");
+AsyncWebServerResponse *response = request->beginResponse(littlefs, "/index.htm");
 
 //Send index.htm as text
-AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.htm", "text/plain");
+AsyncWebServerResponse *response = request->beginResponse(littlefs, "/index.htm", "text/plain");
 
 //Download index.htm
-AsyncWebServerResponse *response = request->beginResponse(SPIFFS, "/index.htm", String(), true);
+AsyncWebServerResponse *response = request->beginResponse(littlefs, "/index.htm", String(), true);
 
 response->addHeader("Server","ESP Async Web Server");
 request->send(response);
@@ -571,7 +571,7 @@ String processor(const String& var)
 // ...
 
 //Send index.htm with template processor function
-request->send(SPIFFS, "/index.htm", String(), false, processor);
+request->send(littlefs, "/index.htm", String(), false, processor);
 ```
 
 ### Respond with content using a callback
@@ -772,8 +772,8 @@ request->send(response);
 ```
 
 ## Serving static files
-In addition to serving files from SPIFFS as described above, the server provide a dedicated handler that optimize the
-performance of serving files from SPIFFS - ```AsyncStaticWebHandler```. Use ```server.serveStatic()``` function to
+In addition to serving files from littlefs as described above, the server provide a dedicated handler that optimize the
+performance of serving files from littlefs - ```AsyncStaticWebHandler```. Use ```server.serveStatic()``` function to
 initialize and add a new instance of ```AsyncStaticWebHandler``` to the server.
 The Handler will not handle the request if the file does not exists, e.g. the server will continue to look for another
 handler that can handle the request.
@@ -782,26 +782,26 @@ Notice that you can chain setter functions to setup the handler, or keep a point
 ### Serving specific file by name
 ```cpp
 // Serve the file "/www/page.htm" when request url is "/page.htm"
-server.serveStatic("/page.htm", SPIFFS, "/www/page.htm");
+server.serveStatic("/page.htm", littlefs, "/www/page.htm");
 ```
 
 ### Serving files in directory
-To serve files in a directory, the path to the files should specify a directory in SPIFFS and ends with "/".
+To serve files in a directory, the path to the files should specify a directory in littlefs and ends with "/".
 ```cpp
 // Serve files in directory "/www/" when request url starts with "/"
 // Request to the root or none existing files will try to server the defualt
 // file name "index.htm" if exists
-server.serveStatic("/", SPIFFS, "/www/");
+server.serveStatic("/", littlefs, "/www/");
 
 // Server with different default file
-server.serveStatic("/", SPIFFS, "/www/").setDefaultFile("default.html");
+server.serveStatic("/", littlefs, "/www/").setDefaultFile("default.html");
 ```
 
 ### Serving static files with authentication
 
 ```cpp
 server
-    .serveStatic("/", SPIFFS, "/www/")
+    .serveStatic("/", littlefs, "/www/")
     .setDefaultFile("default.html")
     .setAuthentication("user", "pass");
 ```
@@ -811,12 +811,12 @@ It is possible to specify Cache-Control header value to reduce the number of cal
 the files. For more information on Cache-Control values see [Cache-Control](https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.9)
 ```cpp
 // Cache responses for 10 minutes (600 seconds)
-server.serveStatic("/", SPIFFS, "/www/").setCacheControl("max-age=600");
+server.serveStatic("/", littlefs, "/www/").setCacheControl("max-age=600");
 
 //*** Change Cache-Control after server setup ***
 
 // During setup - keep a pointer to the handler
-AsyncStaticWebHandler* handler = &server.serveStatic("/", SPIFFS, "/www/").setCacheControl("max-age=600");
+AsyncStaticWebHandler* handler = &server.serveStatic("/", littlefs, "/www/").setCacheControl("max-age=600");
 
 // At a later event - change Cache-Control
 handler->setCacheControl("max-age=30");
@@ -827,13 +827,13 @@ It is possible to specify Date-Modified header to enable the server to return No
 with "If-Modified-Since" header with the same value, instead of responding with the actual file content.
 ```cpp
 // Update the date modified string every time files are updated
-server.serveStatic("/", SPIFFS, "/www/").setLastModified("Mon, 20 Jun 2016 14:00:00 GMT");
+server.serveStatic("/", littlefs, "/www/").setLastModified("Mon, 20 Jun 2016 14:00:00 GMT");
 
 //*** Chage last modified value at a later stage ***
 
 // During setup - read last modified value from config or EEPROM
 String date_modified = loadDateModified();
-AsyncStaticWebHandler* handler = &server.serveStatic("/", SPIFFS, "/www/");
+AsyncStaticWebHandler* handler = &server.serveStatic("/", littlefs, "/www/");
 handler->setLastModified(date_modified);
 
 // At a later event when files are updated
@@ -855,7 +855,7 @@ String processor(const String& var)
 
 // ...
 
-server.serveStatic("/", SPIFFS, "/www/").setTemplateProcessor(processor);
+server.serveStatic("/", littlefs, "/www/").setTemplateProcessor(processor);
 ```
 
 ## Param Rewrite With Matching
@@ -920,8 +920,8 @@ Two filter callback are provided for convince:
 
 ### Serve different site files in AP mode
 ```cpp
-server.serveStatic("/", SPIFFS, "/www/").setFilter(ON_STA_FILTER);
-server.serveStatic("/", SPIFFS, "/ap/").setFilter(ON_AP_FILTER);
+server.serveStatic("/", littlefs, "/www/").setFilter(ON_STA_FILTER);
+server.serveStatic("/", littlefs, "/ap/").setFilter(ON_AP_FILTER);
 ```
 
 ### Rewrite to different index on AP
@@ -929,7 +929,7 @@ server.serveStatic("/", SPIFFS, "/ap/").setFilter(ON_AP_FILTER);
 // Serve the file "/www/index-ap.htm" in AP, and the file "/www/index.htm" on STA
 server.rewrite("/", "index.htm");
 server.rewrite("/index.htm", "index-ap.htm").setFilter(ON_AP_FILTER);
-server.serveStatic("/", SPIFFS, "/www/");
+server.serveStatic("/", littlefs, "/www/");
 ```
 
 ### Serving different hosts
@@ -938,8 +938,8 @@ server.serveStatic("/", SPIFFS, "/www/");
 bool filterOnHost1(AsyncWebServerRequest *request) { return request->host() == "host1"; }
 
 // Server setup: server files in "/host1/" to requests for "host1", and files in "/www/" otherwise.
-server.serveStatic("/", SPIFFS, "/host1/").setFilter(filterOnHost1);
-server.serveStatic("/", SPIFFS, "/www/");
+server.serveStatic("/", littlefs, "/host1/").setFilter(filterOnHost1);
+server.serveStatic("/", littlefs, "/www/");
 ```
 
 ### Determine interface inside callbacks
@@ -1317,7 +1317,7 @@ void setup(){
 
   // send a file when /index is requested
   server.on("/index", HTTP_ANY, [](AsyncWebServerRequest *request){
-    request->send(SPIFFS, "/index.htm");
+    request->send(littlefs, "/index.htm");
   });
 
   // HTTP basic authentication
@@ -1359,7 +1359,7 @@ void setup(){
   });
 
   // attach filesystem root at URL /fs
-  server.serveStatic("/fs", SPIFFS, "/");
+  server.serveStatic("/fs", littlefs, "/");
 
   // Catch-All Handlers
   // Any request that can not find a Handler that canHandle it
@@ -1443,8 +1443,8 @@ Example of OTA code
 ```cpp
   // OTA callbacks
   ArduinoOTA.onStart([]() {
-    // Clean SPIFFS
-    SPIFFS.end();
+    // Clean littlefs
+    littlefs.end();
 
     // Disable client connections    
     ws.enable(false);

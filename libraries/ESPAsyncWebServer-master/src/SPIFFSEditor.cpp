@@ -1,4 +1,4 @@
-#include "SPIFFSEditor.h"
+#include "littlefsEditor.h"
 #include <FS.h>
 
 //File: edit.htm.gz, Size: 4151
@@ -266,7 +266,7 @@ const uint8_t edit_htm_gz[] PROGMEM = {
  0xE8, 0x9D, 0x36, 0x92, 0x29, 0x00, 0x00
 };
 
-#define SPIFFS_MAXLENGTH_FILEPATH 32
+#define littlefs_MAXLENGTH_FILEPATH 32
 const char *excludeListFile = "/.exclude.files";
 
 typedef struct ExcludeListS {
@@ -319,7 +319,7 @@ static bool addExclude(const char *item){
 }
 
 static void loadExcludeList(fs::FS &_fs, const char *filename){
-    static char linebuf[SPIFFS_MAXLENGTH_FILEPATH];
+    static char linebuf[littlefs_MAXLENGTH_FILEPATH];
     fs::File excludeFile=_fs.open(filename, "r");
     if(!excludeFile){
         //addExclude("/*.js.gz");
@@ -343,13 +343,13 @@ static void loadExcludeList(fs::FS &_fs, const char *filename){
           if(lastChar != '\r'){
             linebuf[idx++] = (char) lastChar;
           }
-        } while ((lastChar >= 0) && (lastChar != '\n') && (idx < SPIFFS_MAXLENGTH_FILEPATH));
+        } while ((lastChar >= 0) && (lastChar != '\n') && (idx < littlefs_MAXLENGTH_FILEPATH));
 
         if(isOverflowed){
           isOverflowed = (lastChar != '\n');
           continue;
         }
-        isOverflowed = (idx >= SPIFFS_MAXLENGTH_FILEPATH);
+        isOverflowed = (idx >= littlefs_MAXLENGTH_FILEPATH);
         linebuf[idx-1] = '\0';
         if(!addExclude(linebuf)){
             excludeFile.close();
@@ -377,9 +377,9 @@ static bool isExcluded(fs::FS &_fs, const char *filename) {
 // WEB HANDLER IMPLEMENTATION
 
 #ifdef ESP32
-SPIFFSEditor::SPIFFSEditor(const fs::FS& fs, const String& username, const String& password)
+littlefsEditor::littlefsEditor(const fs::FS& fs, const String& username, const String& password)
 #else
-SPIFFSEditor::SPIFFSEditor(const String& username, const String& password, const fs::FS& fs)
+littlefsEditor::littlefsEditor(const String& username, const String& password, const fs::FS& fs)
 #endif
 :_fs(fs)
 ,_username(username)
@@ -388,7 +388,7 @@ SPIFFSEditor::SPIFFSEditor(const String& username, const String& password, const
 ,_startTime(0)
 {}
 
-bool SPIFFSEditor::canHandle(AsyncWebServerRequest *request){
+bool littlefsEditor::canHandle(AsyncWebServerRequest *request){
   if(request->url().equalsIgnoreCase("/edit")){
     if(request->method() == HTTP_GET){
       if(request->hasParam("list"))
@@ -432,7 +432,7 @@ bool SPIFFSEditor::canHandle(AsyncWebServerRequest *request){
 }
 
 
-void SPIFFSEditor::handleRequest(AsyncWebServerRequest *request){
+void littlefsEditor::handleRequest(AsyncWebServerRequest *request){
   if(_username.length() && _password.length() && !request->authenticate(_username.c_str(), _password.c_str()))
     return request->requestAuthentication();
 
@@ -525,7 +525,7 @@ void SPIFFSEditor::handleRequest(AsyncWebServerRequest *request){
   }
 }
 
-void SPIFFSEditor::handleUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final){
+void littlefsEditor::handleUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final){
   if(!index){
     if(!_username.length() || request->authenticate(_username.c_str(),_password.c_str())){
       _authenticated = true;

@@ -16,5 +16,6 @@ RFID (Weigand) controlled electronic doorlock
 - [WiFi by Arduino](https://github.com/arduino-libraries/WiFi)
 - [Adafruit SSD1306 Wemos Mini OLED by Adafruit + mcauser](https://github.com/mcauser/Adafruit_SSD1306)
 - [Adafruit GFX](https://github.com/adafruit/Adafruit-GFX-Library)
+- [ESPAsyncWebSrv by dvarrel](https://github.com/dvarrel/ESPAsyncWebSrv)
 
 # Troubleshooting
