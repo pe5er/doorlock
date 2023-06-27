@@ -3,9 +3,13 @@
    Interfaces between an RFID card reader and either a magnetic door lock or electric roller shutter. 
    Uses a filesystem library to compare the RFID card ID against a list of authorised cards in a file.
    Provides a web service for viewing logs and performing OTA updates.
+  - ATTRIBUTION
+   Based on https://github.com/swanseahackspace/doorlock
 */
 
 /*-----( Import needed libraries )-----*/
+
+//LCD
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
@@ -15,93 +19,60 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include "time.h"
 
 //Other
 #include <Wiegand.h>
 
 //Filesystem
-//#include <FS.h>
-#include <LittleFS.h>       // https://github.com/espressif/arduino-esp32/tree/master/libraries/LittleFS
+#include <LittleFS.h> // https://github.com/espressif/arduino-esp32/tree/master/libraries/LittleFS
 
 /*-----( Declare Constants and Pin Numbers )-----*/
-#include "pcb_roller_shutter.h" // board specific pin definitions
+#include "pcb_roller_shutter.h" //board specific pin definitions
 #include "logo.h"
 #include "config.h"
-#include "secrets.h" // login credentials. TODO: investigate using WiFi manager to not hardcode this.
-#include "html.h"
-
-const char* PARAM_INPUT_1 = "output";
-const char* PARAM_INPUT_2 = "state";
+#include "secrets.h" // Credentials for HTTP Basic Auth. Please define WWW_USER and WWW_PASSWORD constants.
 
 /*-----( Declare objects )-----*/
 WiFiManager wm;
 AsyncWebServer server(80);
-Adafruit_SSD1306 display(-1); //Initialise display library with no reset pin by passing it -1
+WIEGAND wg;
 
+//Display
+Adafruit_SSD1306 display(-1); // Initialise display library with no reset pin by passing it -1
 #if (SSD1306_LCDHEIGHT != 48)
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 
-WIEGAND wg;
-
 /*-----( Declare Variables )-----*/
-bool LED1_on = false;
-bool LED2_on = false;
-bool ButtonRelay_On = false;
-bool SwitchLED_On = false;
-bool RFID_Authenticated = false;
 
-unsigned long tAuth = 0;
-unsigned long tButton = 0;
-int timeout = 0;
-
+// General
+bool ota_enabled = true;
 String debugMessage;
 
-// Replaces placeholder with button section in your web page
-String processor(const String& var){
-  //Serial.println(var);
-  if(var == "BUTTONPLACEHOLDER"){
-    String buttons = "";
-    buttons += "<h4>Output - Switch LED</h4><label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleCheckbox(this)\" id=\" " + String(SWITCH_LED) + "\" " + outputState(SWITCH_LED) + "><span class=\"slider\"></span></label>";
-    buttons += "<h4>Output - RFID LED</h4><label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleCheckbox(this)\" id=\" " + String(RFID_LED) + "\" " + outputState(RFID_LED) + "><span class=\"slider\"></span></label>";
-    buttons += "<h4>Output - Relay</h4><label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleCheckbox(this)\" id=\" " + String(BUTTON_RELAY) + "\" " + outputState(BUTTON_RELAY) + "><span class=\"slider\"></span></label>";
-    
-    if (LittleFS.exists(CARD_FILE)) {
-    
-     buttons += "<p>Cardfile: " + String(CARD_FILE) + " is " + fileSize(CARD_FILE) + " bytes";
-     int count = sanityCheck(CARD_FILE);
-     if (count <= 0) {
-      buttons += ", in an invalid file";
-     } else {
-      buttons += ", contains " + String(count) + " keyfob IDs";
-      buttons += " - <a href=\"/download\">Download</a>";
-     }
-     
-     buttons += ".</p>";
-     } else {
-       buttons += "<p>No cardfile found</p>";
-     }
+// Server
+File uploadFile;
+String upload_error;
+int upload_code = 200;
 
-    return buttons;
-  }
-  return String();
-}
+// Auth
+bool RFID_Authenticated = false; // Set True when authentication is given
+unsigned long tAuth = 0; // time in milliseconds when authorisation is first given
+unsigned long tButton = 0; // time in milliseconds when a button was most recently pressed
+int timeout = 0; // stores different timeout lengths depending on the current state
 
-String outputState(int output){
-  if(digitalRead(output)){
-    return "checked";
-  }
-  else {
-    return "";
-  }
-}
+// Time
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 0;
+const int   daylightOffset_sec = 0; 
 
 void setup() { /****** SETUP: RUNS ONCE ******/
 
+  // IO Setup
   pinMode(RESET_BUTTON, INPUT_PULLUP);
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
-  pinMode(RFID_LED, OUTPUT);
+  pinMode(RFID_LED, OUTPUT); // Red light on the RFID reader
   pinMode(OUTSIDE_RAISE_LOGIC, INPUT_PULLUP);
   pinMode(OUTSIDE_LOWER_LOGIC, INPUT_PULLUP);
 
@@ -111,24 +82,24 @@ void setup() { /****** SETUP: RUNS ONCE ******/
   pinMode(SWITCH_LED, OUTPUT);
   digitalWrite(SWITCH_LED, LOW);
 
+  // Serial Setup
   Serial.begin(115200);
 
-  // generate display voltage from 3V3 rail
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48)
-
+  // Display Setup
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48). generate display voltage from 3V3 rail
   display.setRotation(2);
   display.clearDisplay();
-  // display init complete
   display.drawBitmap(8, 0, logo_bmp, 48, 48, 1);
   display.display();
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
+  // Filesystem Setup
   if (!LittleFS.begin(true)) {
-    printSerialAndDisplay("FS: Cannot mount LittleFS");
+    printSerialAndDisplay("[FS] Cannot mount LittleFS");
   }
 
-  //WiFi Manager
+  // WiFi Manager Setup
   wm.setConfigPortalTimeout(180); // 3 minutes to complete setup
   bool result;
   result = wm.autoConnect(MANAGER_AP);
@@ -139,6 +110,10 @@ void setup() { /****** SETUP: RUNS ONCE ******/
     printSerialAndDisplay("[WLAN] Connected");
   }
 
+  debugMessage = "[WLAN] " + WiFi.localIP().toString();
+  printSerialAndDisplay(debugMessage);
+
+  // OTA Setup
   ArduinoOTA.setHostname(HOSTNAME);
   ArduinoOTA.setPassword(WWW_PASSWORD);
 
@@ -168,67 +143,27 @@ void setup() { /****** SETUP: RUNS ONCE ******/
 
   ArduinoOTA.begin();
 
-  String localIP = WiFi.localIP().toString();
-  printSerialAndDisplay(localIP);
+  // NTP Setup
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html, processor);
-  });
+  // Wiegand Setup
+  wg.begin(DATA0,DATA1);
 
-  server.onNotFound(notFound);
-
-  server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request){
-    String out = "<html><head><title>Upload Keyfob list</title></head><body>\
-<form enctype=\"multipart/form-data\" action=\"/upload\" method=\"POST\">\
-<input type=\"hidden\" name=\"MAX_FILE_SIZE\" value=\"32000\" />\
-Select file to upload: <input name=\"file\" type=\"file\" />\
-<input type=\"submit\" value=\"Upload file\" />\
-</form></body></html>";
-    request->send(200, "text/html", out);
-
-    File uploadFile;
-
-    String upload_error;
-    int upload_code = 200;
-  }); 
-
+  // Web Server Setup
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/upload", HTTP_GET, handleUploadRequest);
   server.on( "/upload", HTTP_POST, [] (AsyncWebServerRequest *request){
     request->send(200, "text/html");
   },handleFileUpload);
-
-  // Send a GET request to <ESP_IP>/update?output=<inputMessage1>&state=<inputMessage2>
-  server.on("/update", HTTP_GET, [] (AsyncWebServerRequest *request) {
-    String inputMessage1;
-    String inputMessage2;
-    // GET input1 value on <ESP_IP>/update?output=<inputMessage1>&state=<inputMessage2>
-    if (request->hasParam(PARAM_INPUT_1) && request->hasParam(PARAM_INPUT_2)) {
-      inputMessage1 = request->getParam(PARAM_INPUT_1)->value();
-      inputMessage2 = request->getParam(PARAM_INPUT_2)->value();
-      digitalWrite(inputMessage1.toInt(), inputMessage2.toInt());
-    }
-    else {
-      inputMessage1 = "No message sent";
-      inputMessage2 = "No message sent";
-    }
-    Serial.print("GPIO: ");
-    Serial.print(inputMessage1);
-    Serial.print(" - Set to: ");
-    Serial.println(inputMessage2);
-    request->send(200, "text/plain", "OK");
-  });
+  server.onNotFound(handleNotFound);
 
   server.begin();
 
-
-  wg.begin(DATA0,DATA1);
-
-
 }  //--(end setup )---
-
 
 void loop() { /****** LOOP: RUNS CONSTANTLY ******/
 
-  checkResetButton();
+  checkResetButton(); // checks if on-module button is being held. If so: reset wifi config
   ArduinoOTA.handle();
 
   if(!RFID_Authenticated){
@@ -272,6 +207,153 @@ void loop() { /****** LOOP: RUNS CONSTANTLY ******/
 	}
 }  //--(end main loop )---
 
+/*-----( Declare User-written Functions )-----*/
+
+// Web server callback functions
+void handleRoot(AsyncWebServerRequest *request){
+
+  char upTime[16];
+  int sec = millis() / 1000;
+  int mi = sec / 60;
+  int hr = mi / 60;
+  int day = hr / 24;
+  
+  snprintf(upTime, 16, "%dd %02d:%02d:%02d", day, hr % 24, mi % 60, sec % 60);
+
+  char currentTime[20] = {0};
+  getCurrentTime(currentTime);
+    
+  String out = "<html>\
+  <head>\
+    <title>Roller Shutter Controller</title>\
+    <style>\
+      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; }\
+    </style>\
+  </head>\
+  <body>\
+    <h1>Roller Shutter Controller!</h1>\
+    <p>Uptime: " + (String)upTime + "</p>\n";
+
+  out += "<p>Time now: " + String(currentTime) + "</p>\n";
+  out += "<p>Onboard Flash disk: - Size:" + String(LittleFS.totalBytes()) + " Used:" + String(LittleFS.usedBytes()) + "</p>\n";
+  out += "<p>Lock is currently ";
+
+  if(RFID_Authenticated) { out += "AUTHORISED"; } else { out += "UNAUTHORISED"; }
+
+  out += "</p>\n";
+
+  if (LittleFS.exists(CARD_FILE)) {
+    
+     out += "<p>Cardfile: " + String(CARD_FILE) + " is " + fileSize(CARD_FILE) + " bytes";
+     int count = sanityCheck(CARD_FILE);
+     if (count <= 0) {
+      out += ", in an invalid file";
+     } else {
+      out += ", contains " + String(count) + " keyfob IDs";
+      out += " - <a href=\"/download\">Download</a>";
+     }
+     
+     out += ".</p>";
+  } else {
+    out += "<p>No cardfile found :(</p>";
+  }
+
+  out += "<ul>\
+      <li><a href=\"/reset\">Reset Configuration</a></li>\
+      <li><a href=\"/upload\">Upload Cardlist</a></li>";
+
+  if (LittleFS.exists(LOG_FILE)) {
+    out += "<li><a href=\"/wipelog\">Wipe log file</a></li>";
+    out += "<li><a href=\"/viewlog?count=30\">View entry log</a></li>";
+    out += "<li><a href=\"/download_logfile\">Download full logfile</a></li>";
+  } else {
+    out += "<li>No logfile found</li>";
+  }
+
+  if (ota_enabled) {
+    out += "<li>OTA Updates ENABLED.";
+  } else {
+    out += "<li><a href=\"/enable_ota\">Enable OTA Updates</a>";
+  }
+  
+  out += "</ul>";
+  out += "</body></html>";
+
+  request->send(200, "text/html", out);
+};
+
+void handleUploadRequest(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+  String out = "<html><head><title>Upload Keyfob list</title></head><body>\
+  <form enctype=\"multipart/form-data\" action=\"/upload\" method=\"POST\">\
+  <input type=\"hidden\" name=\"MAX_FILE_SIZE\" value=\"32000\" />\
+  Select file to upload: <input name=\"file\" type=\"file\" />\
+  <input type=\"submit\" name=\"submit\" value=\"Upload file\" />\
+  </form></body></html>";
+  request->send(200, "text/html", out);
+} 
+
+void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  debugMessage = "[HTTP] Client:" + request->client()->remoteIP().toString() + " " + request->url();
+  printSerialAndDisplay(debugMessage);
+
+  if (!index) {
+    debugMessage = "[HTTP] Upload Start: " + String(filename);
+    // open the file on first call and store the file handle in the request object
+    request->_tempFile = LittleFS.open(CARD_TMPFILE, "w");
+    printSerialAndDisplay(debugMessage);
+  }
+  
+  if (len) {
+    // stream the incoming chunk to the opened file
+    request->_tempFile.write(data, len);
+    debugMessage = "[FS] Writing file: " + String(filename) + " index=" + String(index) + " len=" + String(len);
+    printSerialAndDisplay(debugMessage);
+  }
+
+  if (final) {
+    debugMessage = "[HTTP] Upload Complete: " + String(filename) + ",size: " + String(index + len);
+    // close the file handle as the upload is now done
+    request->_tempFile.close();
+    printSerialAndDisplay(debugMessage);
+  }
+
+  handleUploadComplete(request);
+}
+
+void handleUploadComplete(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  String out = "<p>Upload finished.";
+  if (upload_code != 200) {
+    out += "Error: "+upload_error;
+  } else {
+    out += " Success";
+    // upload with no errors, replace old one
+    LittleFS.remove(CARD_FILE);
+    LittleFS.rename(CARD_TMPFILE, CARD_FILE);
+
+    debugMessage = "[FS] Cardfile Updated";
+    printSerialAndDisplay(debugMessage);
+  }
+  out += "</p><a href=\"/\">Back</a>";
+
+  request->send(upload_code, "text/html", out);
+}
+
+void handleNotFound(AsyncWebServerRequest *request) {
+    request->send(404, "text/plain", "Not found");
+}
+
+// io functions
 void grantAccess(){
   RFID_Authenticated = true;
   Serial.println("[AUTH] Relay ON");
@@ -280,10 +362,11 @@ void grantAccess(){
 }
 
 void denyAccess(){
-  Serial.println("[AUTH] Relay OFF");
   digitalWrite(BUTTON_RELAY, LOW);
   digitalWrite(SWITCH_LED, LOW);
   RFID_Authenticated = false;
+  debugMessage = "[AUTH] Deauthed";
+  printSerialAndDisplay(debugMessage);
 }
 
 void flashButtonLights(int i){
@@ -299,11 +382,11 @@ void checkResetButton(){
 
   // check for button press
   if ( digitalRead(RESET_BUTTON) == LOW ) {
-    // poor mans debounce/press-hold, code not ideal for production
+    // poor mans debounce/press-hold, not ideal for production
     delay(50);
     if( digitalRead(RESET_BUTTON) == LOW ){
       printSerialAndDisplay("Hold to reset");
-      // still holding button for 3000 ms, reset settings, code not ideaa for production
+      // still holding button for 3000 ms, reset settings, not ideal for production
       delay(3000); // reset delay hold
       if( digitalRead(RESET_BUTTON) == LOW ){
         printSerialAndDisplay("Erasing Config, restarting");
@@ -314,19 +397,7 @@ void checkResetButton(){
   }
 }
 
-/*-----( Declare User-written Functions )-----*/
-void printSerialAndDisplay(String text){
-  display.clearDisplay();
-  display.setCursor(0,0);
-  display.println(text);
-  display.display();
-  Serial.println(text);
-}
-
-void notFound(AsyncWebServerRequest *request) {
-    request->send(404, "text/plain", "Not found");
-}
-
+// filesystem functions
 String findKeyfob(unsigned int cardID)
 {
   File f = LittleFS.open(CARD_FILE, "r");
@@ -349,27 +420,15 @@ String findKeyfob(unsigned int cardID)
 
     unsigned int newcode = (wcode.toInt() & 0xFFFFFF);
 
-/* debug
-    Serial.print("Line: code='");
-    Serial.print(wcode);
-    Serial.print("' (");
-    Serial.print(newcode);
-    Serial.print(") name='");
-    Serial.print(wname);
-    Serial.print("'");
-*/
     if (cardID == newcode) {
-   //   Serial.println(" - FOUND IT");
       answer = wname;
       break;
     }
-    //Serial.println();
   }
   f.close();
   return answer;
 }
 
-/* how big is a file */
 int fileSize(const char *filename){
   int ret = -1;
   File file = LittleFS.open(filename, "r");
@@ -409,46 +468,25 @@ int sanityCheck(const char * filename)
   return count; 
 }
 
-void handleFileUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+// other functions
+void printSerialAndDisplay(String text){
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println(text);
+  display.display();
+  Serial.println(text);
+}
 
-  String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
-  printSerialAndDisplay(logmessage);
+void getCurrentTime(char *currentTime){
 
-  if (!index) {
-    logmessage = "Upload Start: " + String(filename);
-    // open the file on first call and store the file handle in the request object
-    request->_tempFile = LittleFS.open(CARD_TMPFILE, "w");
-    printSerialAndDisplay(logmessage);
-  }
+  struct tm timeinfo;
+  getLocalTime(&timeinfo);
   
-  if (len) {
-    // stream the incoming chunk to the opened file
-    request->_tempFile.write(data, len);
-    logmessage = "Writing file: " + String(filename) + " index=" + String(index) + " len=" + String(len);
-    printSerialAndDisplay(logmessage);
-  }
-
-  if (final) {
-    logmessage = "Upload Complete: " + String(filename) + ",size: " + String(index + len);
-    // close the file handle as the upload is now done
-    request->_tempFile.close();
-    printSerialAndDisplay(logmessage);
-    LittleFS.remove(CARD_FILE);
-    LittleFS.rename(CARD_TMPFILE, CARD_FILE);
-
-    logmessage = "Cardfile Created";
-    printSerialAndDisplay(logmessage);
-
-    if (LittleFS.exists(CARD_FILE)) {
-      logmessage = "Cardfile exists!!!";
-      printSerialAndDisplay(logmessage);
-    }
-
-    if (LittleFS.exists(CARD_TMPFILE)) {
-      logmessage = "tempfile exists!!!";
-      printSerialAndDisplay(logmessage);
-    }
-
-    request->redirect("/");
-  }
+  snprintf(currentTime, 20, "%02d/%02d/%04d %02d:%02d:%02d",\
+  timeinfo.tm_mday,\
+  timeinfo.tm_mon + 1,\
+  timeinfo.tm_year + 1900,\
+  timeinfo.tm_hour + 1,\
+  timeinfo.tm_min + 1,\
+  timeinfo.tm_sec + 1);
 }
