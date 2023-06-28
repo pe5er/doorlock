@@ -151,6 +151,11 @@ void setup() { /****** SETUP: RUNS ONCE ******/
 
   // Web Server Setup
   server.on("/", HTTP_GET, handleRoot);
+  server.on( "/reset", handleReset );
+  server.on( "/download", handleDownload );
+  server.on( "/wipelog", handleWipeLog );
+  server.on( "/viewlog", handleViewLog );
+  server.on( "/download_logfile", handleDownloadLogfile );
   server.on("/upload", HTTP_GET, handleUploadRequest);
   server.on( "/upload", HTTP_POST, [] (AsyncWebServerRequest *request){
     request->send(200, "text/html");
@@ -181,6 +186,7 @@ void loop() { /****** LOOP: RUNS CONSTANTLY ******/
         tAuth = millis();
         tButton = tAuth;
         timeout = TIMER_INITIAL;
+        logEntry("authorised", cardID, cardholderName);
         grantAccess();
         //logEntry(now(), code);
 
@@ -188,6 +194,7 @@ void loop() { /****** LOOP: RUNS CONSTANTLY ******/
       debugMessage = "[AUTH] Denied Card  " + String(cardID);
       printSerialAndDisplay(debugMessage);
       flashButtonLights(2);
+      logEntry("unauthorised", cardID, "");
       } else {
         Serial.println("[WG] Invalid CardID");
       }
@@ -281,6 +288,88 @@ void handleRoot(AsyncWebServerRequest *request){
 
   request->send(200, "text/html", out);
 };
+
+void handleReset(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  request->send(200, "text/plain", "Rebooting to config manager...\n\n");
+
+  WiFiManager wm;
+  wm.resetSettings();
+  WiFi.disconnect();
+  ESP.restart();
+  delay(5000);
+}
+
+void handleDownload(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  if (!LittleFS.exists(CARD_FILE)) {
+    request->send(404, "text/plain", "Card file not found");
+    return;
+  }
+
+  request->send(LittleFS, CARD_FILE, String(), true);
+}
+
+void handleWipeLog(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  LittleFS.remove(LOG_FILE);
+  request->send(200, "text/plain", "Logfile deleted");
+}
+
+void handleViewLog(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+ 
+  String out = "<html>";
+  out += "<head>";
+  out += "<title>Card entry log</title>";
+  out += "</head>";
+  out += "<body>";
+
+  int count = 10;
+
+  int noParams = request->params();
+  for(int i=0;i<noParams;i++){
+    AsyncWebParameter* p = request->getParam(i);
+    if(p->name() == "count"){
+      count = p->value().toInt();
+      debugMessage = "[HTTP] Requesting " + String(count) + " log lines";
+      Serial.println(debugMessage);
+    }
+  }
+
+  out += printLog(count);
+  out += "</body></html>";
+
+  request->send(200, "text/html", out);
+}
+
+void handleEnableOTA(AsyncWebServerRequest *request){
+  request->send(200, "text/plain", "Nothing to see here");
+}
+
+void handleDownloadLogfile(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+
+  if (!LittleFS.exists(LOG_FILE)) {
+    request->send(404, "text/plain", "Log file not found");
+    return;
+  }
+
+  request->send(LittleFS, LOG_FILE, String(), true);
+}
 
 void handleUploadRequest(AsyncWebServerRequest *request){
   if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
@@ -466,6 +555,51 @@ int sanityCheck(const char * filename)
   f.close();
 
   return count; 
+}
+
+void logEntry(String eventName, unsigned long cardID, String cardholderName){
+  String entry;
+
+  File f = LittleFS.open(LOG_FILE, "a");
+  if (!f) { 
+    printSerialAndDisplay("[FS] Error opening logfile");
+    return ;
+  }
+
+  char currentTime[20] = {0};
+  getCurrentTime(currentTime);
+
+  entry = String(currentTime) + ", " + eventName + ", " + String(cardID) + ", " + cardholderName + "\n";
+  
+  f.print(entry);
+  f.close();
+}
+
+String printLog(int lastLine){
+  String out;
+
+  File f = LittleFS.open(LOG_FILE, "r");
+  if (!f){ return String("Could not open log file"); }
+
+  int currentLine = 0;
+  out += "<table border=\"1\">";
+  out += "<thead><tr><th>Datetime Stamp, Event, CardID, Cardholder Name</th></tr></thead><tbody>";
+
+  while (f.available() && currentLine < lastLine) {
+    String lineText = f.readStringUntil('\n');
+    debugMessage = "[FS] Log line contents: " + lineText;
+    Serial.println(debugMessage);
+
+    if (lineText.isEmpty()){ // escape if reached EOF
+      out += "</table>";
+      return out;
+    }
+    out += "<tr><td>" +lineText + "</td></tr>";
+    currentLine++;
+  }
+
+  out += "</tbody></table>";
+  return out;
 }
 
 // other functions
