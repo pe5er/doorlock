@@ -124,21 +124,21 @@ void setup() { /****** SETUP: RUNS ONCE ******/
     else // U_LittleFS
       type = "filesystem";
     // NOTE: if updating LittleFS this would be the place to unmount LittleFS using LittleFS.end()
-    printSerialAndDisplay("Start updating " + type);
+    printSerialAndDisplay("[OTA] Start updating " + type);
   });
   ArduinoOTA.onEnd([]() {
-    printSerialAndDisplay("\nEnd");
+    printSerialAndDisplay("[OTA] End");
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) printSerialAndDisplay("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) printSerialAndDisplay("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) printSerialAndDisplay("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) printSerialAndDisplay("Receive Failed");
-    else if (error == OTA_END_ERROR) printSerialAndDisplay("End Failed");
+    if (error == OTA_AUTH_ERROR) printSerialAndDisplay("[OTA] Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) printSerialAndDisplay("[OTA] Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) printSerialAndDisplay("[OTA] Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) printSerialAndDisplay("[OTA] Receive Failed");
+    else if (error == OTA_END_ERROR) printSerialAndDisplay("[OTA] End Failed");
   });
 
   ArduinoOTA.begin();
