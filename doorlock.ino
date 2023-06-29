@@ -47,7 +47,7 @@ Adafruit_SSD1306 display(-1); // Initialise display library with no reset pin by
 /*-----( Declare Variables )-----*/
 
 // General
-bool ota_enabled = true;
+bool ota_enabled = false;
 String debugMessage;
 
 // Server
@@ -151,13 +151,14 @@ void setup() { /****** SETUP: RUNS ONCE ******/
 
   // Web Server Setup
   server.on("/", HTTP_GET, handleRoot);
-  server.on( "/reset", handleReset );
-  server.on( "/download", handleDownload );
-  server.on( "/wipelog", handleWipeLog );
-  server.on( "/viewlog", handleViewLog );
-  server.on( "/download_logfile", handleDownloadLogfile );
+  server.on("/reset", handleReset );
+  server.on("/download", handleDownload );
+  server.on("/wipelog", handleWipeLog );
+  server.on("/viewlog", handleViewLog );
+  server.on("/toggleOTA", handleToggleOTA);
+  server.on("/download_logfile", handleDownloadLogfile );
   server.on("/upload", HTTP_GET, handleUploadRequest);
-  server.on( "/upload", HTTP_POST, [] (AsyncWebServerRequest *request){
+  server.on("/upload", HTTP_POST, [] (AsyncWebServerRequest *request){
     request->send(200, "text/html");
   },handleFileUpload);
   server.onNotFound(handleNotFound);
@@ -169,7 +170,7 @@ void setup() { /****** SETUP: RUNS ONCE ******/
 void loop() { /****** LOOP: RUNS CONSTANTLY ******/
 
   checkResetButton(); // checks if on-module button is being held. If so: reset wifi config
-  ArduinoOTA.handle();
+  if (ota_enabled){ ArduinoOTA.handle(); }
 
   if(!RFID_Authenticated){
     if(wg.available()){
@@ -278,9 +279,9 @@ void handleRoot(AsyncWebServerRequest *request){
   }
 
   if (ota_enabled) {
-    out += "<li>OTA Updates ENABLED.";
+    out += "<li>OTA Updates ENABLED. <a href=\"/toggleOTA\">Disable OTA Updates</a>";
   } else {
-    out += "<li><a href=\"/enable_ota\">Enable OTA Updates</a>";
+    out += "<li>OTA Updates DISABLED. <a href=\"/toggleOTA\">Enable OTA Updates</a>";
   }
   
   out += "</ul>";
@@ -354,8 +355,21 @@ void handleViewLog(AsyncWebServerRequest *request){
   request->send(200, "text/html", out);
 }
 
-void handleEnableOTA(AsyncWebServerRequest *request){
-  request->send(200, "text/plain", "Nothing to see here");
+void handleToggleOTA(AsyncWebServerRequest *request){
+  if(!request->authenticate(WWW_USER, WWW_PASSWORD)){
+    return request->requestAuthentication();
+  }
+  if(!ota_enabled){
+    debugMessage = "[OTA] Enabling OTA Updates";
+    printSerialAndDisplay(debugMessage);
+    ota_enabled = true;
+    request->send(200, "text/plain", "OTA Updates Enabled");
+  } else {
+    debugMessage = "[OTA] Disabling OTA Updates";
+    printSerialAndDisplay(debugMessage);
+    ota_enabled = false;
+    request->send(200, "text/plain", "OTA Updates Disabled");
+  }
 }
 
 void handleDownloadLogfile(AsyncWebServerRequest *request){
