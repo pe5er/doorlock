@@ -76,7 +76,7 @@ void setup() { /****** SETUP: RUNS ONCE ******/
   pinMode(OUTSIDE_RAISE_LOGIC, INPUT_PULLUP);
   pinMode(OUTSIDE_LOWER_LOGIC, INPUT_PULLUP);
 
-  digitalWrite(RFID_LED, LOW);
+  digitalWrite(RFID_LED, HIGH);
   pinMode(BUTTON_RELAY, OUTPUT);
   digitalWrite(BUTTON_RELAY, LOW);
   pinMode(SWITCH_LED, OUTPUT);
@@ -102,6 +102,7 @@ void setup() { /****** SETUP: RUNS ONCE ******/
   // WiFi Manager Setup
   wm.setConfigPortalTimeout(180); // 3 minutes to complete setup
   bool result;
+  wm.setHostname(HOSTNAME);
   result = wm.autoConnect(MANAGER_AP);
 
   if(!result) {
@@ -194,7 +195,7 @@ void loop() { /****** LOOP: RUNS CONSTANTLY ******/
       } else if(cardID != 0) { // CardID not in card file - deny access
       debugMessage = "[AUTH] Denied Card  " + String(cardID);
       printSerialAndDisplay(debugMessage);
-      flashButtonLights(2);
+      flashReaderLights(2);
       logEntry("unauthorised", cardID, "");
       } else {
         Serial.println("[WG] Invalid CardID");
@@ -481,6 +482,15 @@ void flashButtonLights(int i){
   }
 }
 
+void flashReaderLights(int i){
+  for(int j=0;j<i;j++){
+    digitalWrite(RFID_LED, LOW);
+    delay(100);
+    digitalWrite(RFID_LED, HIGH);
+    delay(100);
+  }
+}
+
 void checkResetButton(){
 
   // check for button press
@@ -628,13 +638,15 @@ void printSerialAndDisplay(String text){
 void getCurrentTime(char *currentTime){
 
   struct tm timeinfo;
-  getLocalTime(&timeinfo);
-  
-  snprintf(currentTime, 20, "%02d/%02d/%04d %02d:%02d:%02d",\
-  timeinfo.tm_mday,\
-  timeinfo.tm_mon + 1,\
-  timeinfo.tm_year + 1900,\
-  timeinfo.tm_hour + 1,\
-  timeinfo.tm_min + 1,\
-  timeinfo.tm_sec + 1);
+  if(!getLocalTime(&timeinfo)){
+    currentTime = "01/01/1970 00:00:00";
+  } else {
+    snprintf(currentTime, 20, "%02d/%02d/%04d %02d:%02d:%02d",\
+    timeinfo.tm_mday,\
+    timeinfo.tm_mon + 1,\
+    timeinfo.tm_year + 1900,\
+    timeinfo.tm_hour + 1,\
+    timeinfo.tm_min + 1,\
+    timeinfo.tm_sec + 1);
+  }
 }
